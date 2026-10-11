@@ -25,7 +25,7 @@ import {rgthree} from "./rgthree.js";
 
 type Vector4 = [number, number, number, number];
 
-const ALPHABET = "abcdefghijklmnopqrstuv".split("");
+const ALPHABET = "abcdefghijklmnopqrstuvwxyz".split("");
 
 const OUTPUT_TYPES = ["STRING", "INT", "FLOAT", "BOOLEAN", "*"];
 
@@ -89,7 +89,7 @@ class RgthreePowerPuter extends RgthreeBaseServerNode {
   }
 
   private addAnyInput(num = 1) {
-    for (let i = 0; i < num; i++) {
+    for (let i = 0; i < num && this.inputs.length < ALPHABET.length; i++) {
       this.addInput(ALPHABET[this.inputs.length]!, "*" as string);
     }
   }
@@ -230,7 +230,7 @@ class OutputsWidget extends RgthreeBaseWidget<OutputsWidgetValue> {
       event: event,
       title: "Add an output",
       className: "rgthree-dark",
-      callback: (value) => {
+      callback: (value: any) => {
         if (isLowQuality()) return;
         if (typeof value === "string" && OUTPUT_TYPES.includes(value)) {
           this._value.outputs.push(value);
@@ -259,7 +259,7 @@ class OutputsWidget extends RgthreeBaseWidget<OutputsWidgetValue> {
       event: event,
       title: `Edit output #${bounds.data.index + 1}`,
       className: "rgthree-dark",
-      callback: (value) => {
+      callback: (value: any) => {
         const index = bounds.data.index;
         if (typeof value !== "string" || value === this._value.outputs[index] || isLowQuality()) {
           return;

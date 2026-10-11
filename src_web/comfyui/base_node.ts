@@ -21,7 +21,11 @@ import {
   importIndividualNodesInnerOnDragDrop,
   importIndividualNodesInnerOnDragOver,
 } from "./feature_import_individual_nodes.js";
-import {defineProperty, moveArrayItem} from "rgthree/common/shared_utils.js";
+import {
+  defineProperty,
+  findPrototypePropertyDescriptor,
+  moveArrayItem,
+} from "rgthree/common/shared_utils.js";
 
 /**
  * A base node with standard methods, directly extending the LGraphNode.
@@ -93,14 +97,25 @@ export abstract class RgthreeBaseNode extends LGraphNode {
       this.checkAndRunOnConstructed();
     });
 
+    // Newer ComfyUI frontends track `mode` through an accessor on LGraphNode (backed by
+    // `_state.mode`, which is what gets serialized), so our override must delegate to it.
+    // On legacy frontends `mode` is a plain data property and this is null.
+    const protoMode = findPrototypePropertyDescriptor(this, "mode");
+    const readMode = (): LGraphEventMode | undefined =>
+      protoMode?.get ? protoMode.get.call(this) : this.rgthree_mode;
+
     defineProperty(this, "mode", {
-      get: () => {
-        return this.rgthree_mode;
-      },
+      get: () => readMode(),
       set: (mode: LGraphEventMode) => {
-        if (this.rgthree_mode != mode) {
-          const oldMode = this.rgthree_mode;
+        const oldMode = readMode();
+        if (protoMode?.set) {
+          // Newer frontends: write through so `_state.mode` (used by serialization) stays in sync.
+          protoMode.set.call(this, mode);
+        } else {
+          // Legacy frontends: keep the original behavior.
           this.rgthree_mode = mode;
+        }
+        if (oldMode != mode) {
           this.onModeChange(oldMode, mode);
         }
       },
@@ -339,7 +354,7 @@ export class RgthreeBaseVirtualNode extends RgthreeBaseNode {
  */
 export class RgthreeBaseServerNode extends RgthreeBaseNode {
   static nodeType: LGraphNodeConstructor | null = null;
-  static nodeData: ComfyNodeDef | null = null;
+  static nodeDef: ComfyNodeDef | null = null;
 
   // Drop is enabled by default for server nodes.
   override isDropEnabled = true;
@@ -361,18 +376,18 @@ export class RgthreeBaseServerNode extends RgthreeBaseNode {
    * shouldn't break as often when it modifyies widgets and types.
    */
   async setupFromServerNodeData() {
-    const nodeData = (this.constructor as any).nodeData;
-    if (!nodeData) {
+    const nodeDef = (this.constructor as any).nodeDef || (this.constructor as any).nodeData;
+    if (!nodeDef) {
       throw Error("No node data");
     }
 
     // Necessary for serialization so Comfy backend can check types.
     // Serialized as `class_type`. See app.js#graphToPrompt
-    this.comfyClass = nodeData.name;
+    this.comfyClass = nodeDef.name;
 
-    let inputs = nodeData["input"]["required"];
-    if (nodeData["input"]["optional"] != undefined) {
-      inputs = Object.assign({}, inputs, nodeData["input"]["optional"]);
+    let inputs = nodeDef["input"]["required"];
+    if (nodeDef["input"]["optional"] != undefined) {
+      inputs = Object.assign({}, inputs, nodeDef["input"]["optional"]);
     }
 
     const WIDGETS = this.getWidgets();
@@ -423,11 +438,11 @@ export class RgthreeBaseServerNode extends RgthreeBaseNode {
       }
     }
 
-    for (const o in nodeData["output"]) {
-      let output = nodeData["output"][o];
+    for (const o in nodeDef["output"]) {
+      let output = nodeDef["output"][o];
       if (output instanceof Array) output = "COMBO";
-      const outputName = nodeData["output_name"][o] || output;
-      const outputShape = nodeData["output_is_list"][o]
+      const outputName = nodeDef["output_name"][o] || output;
+      const outputShape = nodeDef["output_is_list"][o]
         ? LiteGraph.GRID_SHAPE
         : LiteGraph.CIRCLE_SHAPE;
       this.addOutput(outputName, output, {shape: outputShape});
@@ -464,6 +479,9 @@ export class RgthreeBaseServerNode extends RgthreeBaseNode {
       rgthreeClass.__registeredForOverride__ = true;
       rgthreeClass.nodeType = comfyClass;
       rgthreeClass.nodeData = nodeData;
+      // At some point, ComfyUI defined a `nodeData` that may or may not be the nodeDef. I think
+      // it's just lazily typed, but just in case, we'll compy the nodeData to our own field to use.
+      rgthreeClass.nodeDef = nodeData;
       rgthreeClass.onRegisteredForOverride(comfyClass, rgthreeClass);
     }
   }
